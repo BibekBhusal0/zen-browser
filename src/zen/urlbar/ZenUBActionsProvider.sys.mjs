@@ -5,6 +5,7 @@
 import { XPCOMUtils } from 'resource://gre/modules/XPCOMUtils.sys.mjs';
 import { UrlbarProvider, UrlbarUtils } from 'resource:///modules/UrlbarUtils.sys.mjs';
 import { globalActions } from 'resource:///modules/ZenUBGlobalActions.sys.mjs';
+import { zenUrlbarResultsLearner } from './ZenUBResultsLearner.sys.mjs';
 
 const lazy = {};
 
@@ -12,9 +13,9 @@ const DYNAMIC_TYPE_NAME = 'zen-actions';
 
 // The suggestion index of the actions row within the urlbar results.
 const MAX_RECENT_ACTIONS = 5;
-const MINIMUM_QUERY_SCORE = 92;
 
-const EN_LOCALE_MATCH = /^en(-.*)$/;
+const MINIMUM_QUERY_SCORE = 92;
+const MINIMUM_PREFIXED_QUERY_SCORE = 30;
 
 ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarResult: 'resource:///modules/UrlbarResult.sys.mjs',
@@ -22,6 +23,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   QueryScorer: 'resource:///modules/UrlbarProviderInterventions.sys.mjs',
   BrowserWindowTracker: 'resource:///modules/BrowserWindowTracker.sys.mjs',
   AddonManager: 'resource://gre/modules/AddonManager.sys.mjs',
+  zenUrlbarResultsLearner: 'resource:///modules/ZenUBResultsLearner.sys.mjs',
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -35,6 +37,8 @@ XPCOMUtils.defineLazyPreferenceGetter(
  * A provider that lets the user view all available global actions for a query.
  */
 export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
+  #seenCommands = new Set();
+
   constructor() {
     super();
     lazy.UrlbarResult.addDynamicResultType(DYNAMIC_TYPE_NAME);
@@ -60,12 +64,12 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
    */
   async isActive(queryContext) {
     return (
-      lazy.enabledPref &&
-      queryContext.searchString &&
-      queryContext.searchString.length < UrlbarUtils.MAX_TEXT_LENGTH &&
-      queryContext.searchString.length > 2 &&
-      !lazy.UrlbarTokenizer.REGEXP_LIKE_PROTOCOL.test(queryContext.searchString) &&
-      EN_LOCALE_MATCH.test(Services.locale.appLocaleAsBCP47)
+      queryContext.searchMode?.source == UrlbarUtils.RESULT_SOURCE.ZEN_ACTIONS ||
+      (lazy.enabledPref &&
+        queryContext.searchString &&
+        queryContext.searchString.length < UrlbarUtils.MAX_TEXT_LENGTH &&
+        queryContext.searchString.length > 2 &&
+        !lazy.UrlbarTokenizer.REGEXP_LIKE_PROTOCOL.test(queryContext.searchString))
     );
   }
 
@@ -92,6 +96,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
             prettyIcon: workspace.icon,
             accentColor,
           },
+          commandId: `zen:workspace-${workspace.uuid}`,
           icon: 'chrome://browser/skin/zen-icons/forward.svg',
         });
       }
@@ -116,6 +121,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
         return {
           icon: 'chrome://browser/skin/zen-icons/extension.svg',
           label: 'Extension',
+          commandId: `zen:extension-${addon.id}`,
           extraPayload: {
             extensionId: addon.id,
             prettyName: addon.name,
@@ -142,14 +148,18 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
    * @param {string} query The user's search query.
    *
    */
-  async #findMatchingActions(query) {
+  async #findMatchingActions(query, isPrefixed) {
     const window = lazy.BrowserWindowTracker.getTopWindow();
     const actions = await this.#getAvailableActions(window);
     let results = [];
     for (let action of actions) {
+      if (isPrefixed && query.length < 1) {
+        results.push({ action, score: 100 });
+        continue;
+      }
       const label = action.extraPayload?.prettyName || action.label;
       const score = this.#calculateFuzzyScore(label, query);
-      if (score > MINIMUM_QUERY_SCORE) {
+      if (score > (isPrefixed ? MINIMUM_PREFIXED_QUERY_SCORE : MINIMUM_QUERY_SCORE)) {
         results.push({
           score,
           action,
@@ -157,6 +167,10 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
       }
     }
     results.sort((a, b) => b.score - a.score);
+    // We must show all we can when prefixed, to avoid showing no results.
+    if (isPrefixed) {
+      return results.map((r) => r.action);
+    }
     return results.slice(0, MAX_RECENT_ACTIONS).map((r) => r.action);
   }
 
@@ -217,25 +231,27 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
 
   async startQuery(queryContext, addCallback) {
     const query = queryContext.trimmedLowerCaseSearchString;
-    if (!query) {
+    const isPrefixed = queryContext.searchMode?.source == UrlbarUtils.RESULT_SOURCE.ZEN_ACTIONS;
+    if (!query && !isPrefixed) {
       return;
     }
 
-    const actionsResults = await this.#findMatchingActions(query);
+    const actionsResults = await this.#findMatchingActions(query, isPrefixed);
     if (!actionsResults.length) {
       return;
     }
 
     const ownerGlobal = lazy.BrowserWindowTracker.getTopWindow();
+    let finalResults = [];
     for (const action of actionsResults) {
       const [payload, payloadHighlights] = lazy.UrlbarResult.payloadAndSimpleHighlights([], {
         suggestion: action.label,
         title: action.label,
-        query: queryContext.searchString,
         zenCommand: action.command,
         dynamicType: DYNAMIC_TYPE_NAME,
         zenAction: true,
-        icon: action.icon || 'chrome://browser/skin/trending.svg',
+        query: isPrefixed ? action.label.trimStart() : queryContext.searchString,
+        icon: action.icon,
         shortcutContent: ownerGlobal.gZenKeyboardShortcutsManager.getShortcutDisplayFromCommand(
           action.command
         ),
@@ -245,15 +261,32 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
 
       let result = new lazy.UrlbarResult(
         UrlbarUtils.RESULT_TYPE.DYNAMIC,
-        UrlbarUtils.RESULT_SOURCE.OTHER_LOCAL,
+        UrlbarUtils.RESULT_SOURCE.ZEN_ACTIONS,
         payload,
         payloadHighlights
       );
-      if (typeof action.suggestedIndex === 'number') {
-        result.suggestedIndex = action.suggestedIndex;
+      if (zenUrlbarResultsLearner.shouldPrioritize(action.commandId) && !isPrefixed) {
+        result.heuristic = true;
+      } else {
+        result.suggestedIndex = zenUrlbarResultsLearner.getDeprioritizeIndex(action.commandId);
+      }
+      result.commandId = action.commandId;
+      if (!(isPrefixed && query.length < 2)) {
+        // We dont want to record prefixed results, as the user explicitly asked for them.
+        // Selecting other results would de-prioritize these actions unfairly.
+        this.#seenCommands.add(action.commandId);
+      }
+      finalResults.push(result);
+    }
+    let i = 0;
+    zenUrlbarResultsLearner.sortCommandsByPriority(finalResults).forEach((result) => {
+      if (isPrefixed && i === 0 && query.length > 1) {
+        result.heuristic = true;
+        delete result.suggestedIndex;
       }
       addCallback(this, result);
-    }
+      i++;
+    });
   }
 
   /**
@@ -308,7 +341,6 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
         attributes: {
           src: result.payload.prettyIcon || '',
           hidden: !prettyIconIsSvg || !result.payload.prettyIcon,
-          workspaceIcon: !!result.payload.workspaceId,
         },
       },
     };
@@ -362,11 +394,25 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     };
   }
 
+  onSearchSessionEnd(_queryContext, _controller, details) {
+    // We should only record the execution if a result was actually used.
+    // Otherwise we would start de-prioritizing commands that were never used.
+    if (details?.result) {
+      let usedCommand = null;
+      if (details?.provider === this.name) {
+        usedCommand = details.result?.commandId;
+      }
+      zenUrlbarResultsLearner.recordExecution(usedCommand, [...this.#seenCommands]);
+    }
+    this.#seenCommands = new Set();
+  }
+
   onEngagement(queryContext, controller, details) {
     const result = details.result;
     const payload = result.payload;
     const command = payload.zenCommand;
     const ownerGlobal = details.element.ownerGlobal;
+    ownerGlobal.gBrowser.selectedBrowser.focus();
     if (typeof command === 'function') {
       command(ownerGlobal);
       return;
@@ -381,7 +427,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
         ownerGlobal.WebExtensionPolicy.getByID(payload.extensionId)
       );
       if (action) {
-        action.openPopup(ownerGlobal, /* without user interaction = */ true);
+        action.triggerAction(ownerGlobal);
       }
       return;
     }
@@ -390,7 +436,6 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     }
     const commandToRun = ownerGlobal.document.getElementById(command);
     if (commandToRun) {
-      ownerGlobal.gBrowser.selectedBrowser.focus();
       commandToRun.doCommand();
     }
   }

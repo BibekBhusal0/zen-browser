@@ -44,6 +44,11 @@
 
     & .zen-workspace-icon {
       pointer-events: none;
+      line-height: 0;
+
+      &:is(img) {
+        width: 14px;
+      }
    
       &[no-icon='true'] {
         width: 6px;

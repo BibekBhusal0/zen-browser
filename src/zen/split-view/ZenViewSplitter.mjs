@@ -212,6 +212,7 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       this.removeGroup(groupIndex);
       if (changeTab) {
         gBrowser.selectedTab = remainingTabs[remainingTabs.length - 1];
+        document.getElementById('cmd_zenNewEmptySplit').removeAttribute('disabled');
       }
     } else {
       const node = this.getSplitNodeFromTab(tab);
@@ -296,7 +297,11 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       }
       // Add a min width to all the browser elements to prevent them from resizing
       const panelsWidth = gBrowser.tabbox.getBoundingClientRect().width;
-      const halfWidth = panelsWidth / 2;
+      let numOfTabsToDivide = 2;
+      if (currentView) {
+        numOfTabsToDivide = currentView.tabs.length + 1;
+      }
+      const halfWidth = panelsWidth / numOfTabsToDivide;
       let threshold =
         gNavToolbox.getBoundingClientRect().width *
         (gZenVerticalTabsManager._prefsRightSide ? 0 : 1);
@@ -375,20 +380,21 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
     }
   }
 
-  onBrowserDragEndToSplit(event) {
+  onBrowserDragEndToSplit(event, cancelled = false) {
     if (!this._canDrop) {
       return;
     }
     const panelsRect = gBrowser.tabbox.getBoundingClientRect();
     const fakeBrowserRect = this.fakeBrowser && this.fakeBrowser.getBoundingClientRect();
     if (
-      (event.target.closest('#tabbrowser-tabbox') && event.target != this.fakeBrowser) ||
-      (fakeBrowserRect &&
-        event.clientX > fakeBrowserRect.left &&
-        event.clientX < fakeBrowserRect.left + fakeBrowserRect.width &&
-        event.clientY > fakeBrowserRect.top &&
-        event.clientY < fakeBrowserRect.top + fakeBrowserRect.height) ||
-      (event.screenX === 0 && event.screenY === 0) // It's equivalent to 0 if the event has been dropped
+      ((event.target.closest('#tabbrowser-tabbox') && event.target != this.fakeBrowser) ||
+        (fakeBrowserRect &&
+          event.clientX > fakeBrowserRect.left &&
+          event.clientX < fakeBrowserRect.left + fakeBrowserRect.width &&
+          event.clientY > fakeBrowserRect.top &&
+          event.clientY < fakeBrowserRect.top + fakeBrowserRect.height) ||
+        (event.screenX === 0 && event.screenY === 0)) && // It's equivalent to 0 if the event has been dropped
+      !cancelled
     ) {
       return;
     }
@@ -396,7 +402,12 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       return;
     }
     const panelsWidth = panelsRect.width;
-    const halfWidth = panelsWidth / 2;
+    let numOfTabsToDivide = 2;
+    const currentView = this._data[this._lastOpenedTab.splitViewValue];
+    if (currentView) {
+      numOfTabsToDivide = currentView.tabs.length + 1;
+    }
+    const halfWidth = panelsWidth / numOfTabsToDivide;
     const padding = ZenThemeModifier.elementSeparation;
     if (!this.fakeBrowser) {
       return;
@@ -888,7 +899,9 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
   removeGroup(groupIndex) {
     const group = this._data[groupIndex];
     for (const tab of group.tabs.reverse()) {
-      gBrowser.ungroupTab(tab);
+      if (tab.group?.hasAttribute('split-view-group')) {
+        gBrowser.ungroupTab(tab);
+      }
     }
     if (this.currentView === groupIndex) {
       this.deactivateCurrentSplitView();
@@ -1177,6 +1190,7 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
     this.currentView = -1;
     this.toggleWrapperDisplay(false);
     this.maybeDisableOpeningTabOnSplitView();
+    window.dispatchEvent(new CustomEvent('ZenViewSplitter:SplitViewDeactivated'));
   }
 
   /**
@@ -1751,24 +1765,12 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
       } else {
         // Create new split view with layout based on drop position
         let gridType = 'vsep';
-        //switch (hoverSide) {
-        //  case 'left':
-        //  case 'right':
-        //    gridType = 'vsep';
-        //    break;
-        //  case 'top':
-        //  case 'bottom':
-        //    gridType = 'hsep';
-        //    break;
-        //  default:
-        //    gridType = 'grid';
-        //}
 
         // Put tabs always as if it was dropped from the left
         this.splitTabs(
           dropSide == 'left' ? [draggedTab, droppedOnTab] : [droppedOnTab, draggedTab],
           gridType,
-          1
+          dropSide == 'left' ? 0 : 1
         );
       }
     }
@@ -1950,7 +1952,9 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
         const groupIndex = this._data.findIndex((group) => group.tabs.includes(emptyTab));
         const newSelectedTab = gBrowser.selectedTab;
         const cleanup = () => {
-          this.removeTabFromGroup(emptyTab, groupIndex, { changeTab: false });
+          this.removeTabFromGroup(emptyTab, groupIndex, { changeTab: !onSwitch, forUnsplit: true });
+          const command = document.getElementById('cmd_zenNewEmptySplit');
+          command.removeAttribute('disabled');
         };
         if (onElementPicked) {
           if (
@@ -1967,9 +1971,6 @@ class nsZenViewSplitter extends nsZenDOMOperatedFeature {
           this.resetTabState(emptyTab, false);
           this.splitTabs([selectedTab, newSelectedTab], 'grid', 1);
         } else {
-          if (!onSwitch) {
-            gBrowser.selectedTab = selectedTab;
-          }
           cleanup();
         }
       },

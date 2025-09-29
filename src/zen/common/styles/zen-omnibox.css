@@ -31,6 +31,7 @@
     --urlbar-container-padding: 0px;
   }
 
+  :root[zen-single-toolbar='true'] &[breakout-extend='true'],
   &[zen-floating-urlbar='true'] {
     --urlbar-container-padding: 3px;
   }
@@ -65,13 +66,6 @@
 }
 
 #urlbar:not([breakout-extend='true']) {
-  & .urlbar-background {
-    transition: background-color 0.15s ease;
-    :root[supress-primary-adjustment] & {
-      transition: none !important;
-    }
-  }
-
   &:hover .urlbar-background {
     background-color: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.2)) !important;
   }
@@ -161,15 +155,15 @@
   order: 2 !important;
 }
 
-#urlbar[breakout] {
-  position: fixed;
-}
-
 #urlbar[breakout-extend='true'] {
+  position: fixed;
   z-index: 2;
 
   & .urlbar-input-container {
-    font-weight: 500;
+    font-weight: 400;
+    @media (-moz-platform: windows) {
+      font-weight: 500;
+    }
   }
 
   & #identity-box {
@@ -178,8 +172,8 @@
 
   & .urlbar-background {
     --zen-urlbar-background-base: light-dark(
-      white,
-      color-mix(in srgb, hsl(0, 0%, 1%), var(--zen-colors-primary) 25%)
+      #fbfbfb,
+      color-mix(in srgb, hsl(0, 0%, 1%), var(--zen-colors-primary) 30%)
     );
     @media -moz-pref('zen.theme.acrylic-elements') {
       --zen-urlbar-background-transparent: color-mix(
@@ -192,14 +186,29 @@
       --zen-urlbar-background-transparent,
       var(--zen-urlbar-background-base)
     ) !important;
-    box-shadow: 0px 0px 90px -10px light-dark(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.75)) !important;
+    box-shadow: 0px 30px 140px -15px light-dark(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.6)) !important;
     backdrop-filter: none !important;
-    border-radius: 12px !important;
     outline: 0.5px solid light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2)) !important;
     outline-offset: var(--zen-urlbar-outline-offset) !important;
     @media -moz-pref('zen.theme.acrylic-elements') {
       backdrop-filter: blur(42px) saturate(110%) brightness(0.25) contrast(100%) !important;
     }
+  }
+
+  &,
+  .urlbar-background {
+    border-radius: 12px !important;
+  }
+
+  &[breakout-extend][animate-searchmode='true']::before {
+    position: absolute;
+    content: '';
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    pointer-events: none;
+    animation: zen-urlbar-searchmode ease-out 1s forwards;
   }
 }
 
@@ -450,7 +459,7 @@
     font-size: 1.5em !important;
   }
   top: var(--zen-urlbar-top) !important;
-  transform: translateX(-50%);
+  translate: -50% 0%;
   left: 50% !important;
 
   #urlbar-container:has(&) {
@@ -532,10 +541,6 @@
     fill: currentColor;
     width: 16px;
     height: 16px;
-
-    &[workspaceIcon] {
-      scale: 1.4;
-    }
   }
 
   &[hidden] {
@@ -585,11 +590,16 @@
 
 .urlbarView-no-wrap {
   align-items: center !important;
+  position: relative;
 }
 
 #urlbar-label-box,
 #urlbar-search-mode-indicator {
-  background-color: color-mix(in srgb, var(--zen-primary-color), transparent 30%) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--zen-primary-color) 50%,
+    light-dark(rgba(0, 0, 0, 0.5), rgba(255, 255, 255, 0.2)) 50%
+  ) !important;
   color: white;
   padding: 4px 8px;
   border-radius: 50px;
@@ -616,9 +626,9 @@
     --zen-selected-bg: color-mix(
       in srgb,
       var(--zen-primary-color) 50%,
-      light-dark(rgba(0, 0, 0, 0.3), rgba(255, 255, 255, 0.2)) 50%
+      light-dark(rgba(0, 0, 0, 0.5), rgba(255, 255, 255, 0.2)) 50%
     );
-    --zen-selected-color: color-mix(in srgb, var(--zen-selected-bg), light-dark(white, black) 40%);
+    --zen-selected-color: color-mix(in srgb, var(--zen-selected-bg), black 30%);
     background-color: var(--zen-selected-bg) !important;
 
     & *,
@@ -628,6 +638,7 @@
 
     & .urlbarView-favicon {
       fill: currentColor !important;
+      stroke: currentColor !important;
     }
 
     & .urlbarView-shortcutContent {
@@ -657,4 +668,15 @@
   & .action-contextualidentity {
     display: none;
   }
+}
+
+/* Hide the results body when there are no results, to avoid showing an empty box */
+.urlbarView[noresults] > .urlbarView-body-outer > .urlbarView-body-inner,
+#urlbar-search-mode-indicator-close {
+  display: none;
+}
+
+#urlbar-search-mode-indicator-title {
+  font-weight: 600;
+  padding: 0px;
 }

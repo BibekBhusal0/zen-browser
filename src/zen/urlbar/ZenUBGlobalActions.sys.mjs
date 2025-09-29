@@ -11,7 +11,6 @@ const globalActionsTemplate = [
     label: 'Toggle Compact Mode',
     command: 'cmd_zenCompactModeToggle',
     icon: 'chrome://browser/skin/zen-icons/sidebar.svg',
-    suggestedIndex: 0,
   },
   {
     label: 'Open Theme Picker',
@@ -22,7 +21,6 @@ const globalActionsTemplate = [
     label: 'New Split View',
     command: 'cmd_zenNewEmptySplit',
     icon: 'chrome://browser/skin/zen-icons/split.svg',
-    suggestedIndex: 0,
   },
   {
     label: 'New Folder',
@@ -33,7 +31,6 @@ const globalActionsTemplate = [
     label: 'Copy Current URL',
     command: 'cmd_zenCopyCurrentURL',
     icon: 'chrome://browser/skin/zen-icons/edit-copy.svg',
-    suggestedIndex: 0,
   },
   {
     label: 'Settings',
@@ -41,14 +38,14 @@ const globalActionsTemplate = [
     icon: 'chrome://browser/skin/zen-icons/settings.svg',
   },
   {
-    label: 'Open New Window',
-    command: 'cmd_newNavigator',
-    icon: 'chrome://browser/skin/zen-icons/window.svg',
-  },
-  {
     label: 'Open Private Window',
     command: 'Tools:PrivateBrowsing',
     icon: 'chrome://browser/skin/zen-icons/private-window.svg',
+  },
+  {
+    label: 'Open New Window',
+    command: 'cmd_newNavigator',
+    icon: 'chrome://browser/skin/zen-icons/window.svg',
   },
   {
     label: 'Pin Tab',
@@ -69,20 +66,26 @@ const globalActionsTemplate = [
     },
   },
   {
-    label: 'Next Workspace',
+    label: 'Next Space',
     command: 'cmd_zenWorkspaceForward',
     icon: 'chrome://browser/skin/zen-icons/forward.svg',
+    isAvailable: (window) => {
+      return window.gZenWorkspaces._workspaceCache.workspaces.length > 1;
+    },
   },
   {
-    label: 'Previous Workspace',
+    label: 'Previous Space',
     command: 'cmd_zenWorkspaceBackward',
     icon: 'chrome://browser/skin/zen-icons/back.svg',
+    isAvailable: (window) => {
+      // This also covers the case of being in private mode
+      return window.gZenWorkspaces._workspaceCache.workspaces.length > 1;
+    },
   },
   {
     label: 'Close Tab',
     command: 'cmd_close',
     icon: 'chrome://browser/skin/zen-icons/close.svg',
-    suggestedIndex: 1,
     isAvailable: (window) => {
       return isNotEmptyTab(window);
     },
@@ -114,7 +117,41 @@ const globalActionsTemplate = [
     isAvailable: (window) => {
       return isNotEmptyTab(window);
     },
-    suggestedIndex: 1,
+  },
+  {
+    label: 'Toggle Tabs on right',
+    command: 'cmd_zenToggleTabsOnRight',
+    icon: 'chrome://browser/skin/zen-icons/sidebars-right.svg',
+  },
+  {
+    label: 'Add to Essentials',
+    command: (window) => window.gZenPinnedTabManager.addToEssentials(window.gBrowser.selectedTab),
+    isAvailable: (window) => {
+      return (
+        window.gZenPinnedTabManager.canEssentialBeAdded(window.gBrowser.selectedTab) &&
+        !window.gBrowser.selectedTab.hasAttribute('zen-essential')
+      );
+    },
+    icon: 'chrome://browser/skin/zen-icons/essential-add.svg',
+  },
+  {
+    label: 'Remove from Essentials',
+    command: (window) => window.gZenPinnedTabManager.removeEssentials(window.gBrowser.selectedTab),
+    isAvailable: (window) => window.gBrowser.selectedTab.hasAttribute('zen-essential'),
+    icon: 'chrome://browser/skin/zen-icons/essential-remove.svg',
+  },
+  {
+    label: 'Find in Page',
+    command: 'cmd_find',
+    icon: 'chrome://browser/skin/zen-icons/search-page.svg',
+    isAvailable: (window) => {
+      return isNotEmptyTab(window);
+    },
+  },
+  {
+    label: 'Manage Extensions',
+    command: 'Tools:Addons',
+    icon: 'chrome://browser/skin/zen-icons/extension.svg',
   },
   {
     label: 'Toggle Tabs on right',
@@ -162,6 +199,10 @@ export const globalActions = globalActionsTemplate.map((action) => ({
   isAvailable: (window) => {
     return window.document.getElementById(action.command)?.getAttribute('disabled') !== 'true';
   },
+  commandId:
+    typeof action.command === 'string'
+      ? action.command
+      : `zen:global-action-${action.label.toLowerCase().replace(/\s+/g, '-')}`,
   extraPayload: {},
   ...action,
 }));

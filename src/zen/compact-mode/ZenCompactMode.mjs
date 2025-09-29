@@ -150,7 +150,8 @@ var gZenCompactModeManager = {
             ":is([panelopen='true'], [open='true'], [breakout-extend='true']):not(#urlbar[zen-floating-urlbar='true']):not(tab):not(.zen-compact-mode-ignore)",
         },
       ],
-      'zen-compact-mode-active'
+      'zen-compact-mode-active',
+      ['panelopen', 'open', 'breakout-extend', 'zen-floating-urlbar']
     );
   },
 
@@ -229,11 +230,6 @@ var gZenCompactModeManager = {
     // IF we are animating IN, call the callbacks first so we can calculate the width
     // once the window buttons are shown
     this.updateContextMenu();
-    if (this.preference) {
-      ZenHasPolyfill.connectObserver(this.sidebarObserverId);
-    } else {
-      ZenHasPolyfill.disconnectObserver(this.sidebarObserverId);
-    }
     if (!this.preference) {
       this._evenListeners.forEach((callback) => callback());
       await this.animateCompactMode();
@@ -245,6 +241,12 @@ var gZenCompactModeManager = {
     if (isUrlbarFocused) {
       gURLBar.focus();
     }
+    if (this.preference) {
+      ZenHasPolyfill.connectObserver(this.sidebarObserverId);
+    } else {
+      ZenHasPolyfill.disconnectObserver(this.sidebarObserverId);
+    }
+    window.dispatchEvent(new CustomEvent('ZenCompactMode:Toggled', { detail: this.preference }));
   },
 
   // NOTE: Dont actually use event, it's just so we make sure
@@ -543,6 +545,7 @@ var gZenCompactModeManager = {
       const onEnter = (event) => {
         setTimeout(() => {
           if (event.type === 'mouseenter' && !event.target.matches(':hover')) return;
+          if (event.target.closest('panel')) return;
           // Dont register the hover if the urlbar is floating and we are hovering over it
           this.clearFlashTimeout('has-hover' + target.id);
           window.requestAnimationFrame(() => {

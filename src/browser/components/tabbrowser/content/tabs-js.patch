@@ -1,5 +1,5 @@
 diff --git a/browser/components/tabbrowser/content/tabs.js b/browser/components/tabbrowser/content/tabs.js
-index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892fc91a208 100644
+index c7557dad38db9ef02b981c46de9595df77cb67db..f45ecacd23179f06a436d5f3d372b536322388ea 100644
 --- a/browser/components/tabbrowser/content/tabs.js
 +++ b/browser/components/tabbrowser/content/tabs.js
 @@ -44,6 +44,9 @@
@@ -70,7 +70,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
  
            if (collapseTabGroupDuringDrag) {
              tab.group.collapsed = true;
-+            gZenFolders.animateGroupMove(tab.group);
++            gZenFolders.collapseVisibleTab(tab.group);
            }
          }
        }
@@ -85,17 +85,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
        if (
          (dropEffect == "move" || dropEffect == "copy") &&
          document == draggedTab.ownerDocument &&
-@@ -1142,7 +1152,8 @@
-         isTabGroupLabel(draggedTab) &&
-         draggedTab._dragData?.expandGroupOnDrop
-       ) {
--        draggedTab.group.collapsed = false;
-+        draggedTab.group.collapsed = draggedTab.group.hasAttribute("has-active");
-+        gZenFolders.animateGroupMove(draggedTab.group, true);
-       }
-     }
- 
-@@ -1196,6 +1207,18 @@
+@@ -1196,6 +1206,18 @@
  
        this._tabDropIndicator.hidden = true;
        event.stopPropagation();
@@ -114,7 +104,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
        if (draggedTab && dropEffect == "copy") {
          let duplicatedDraggedTab;
          let duplicatedTabs = [];
-@@ -1220,8 +1243,9 @@
+@@ -1220,8 +1242,9 @@
          let translateOffsetY = oldTranslateY % tabHeight;
          let newTranslateX = oldTranslateX - translateOffsetX;
          let newTranslateY = oldTranslateY - translateOffsetY;
@@ -126,7 +116,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
  
          if (this.#isContainerVerticalPinnedGrid(draggedTab)) {
            // Update both translate axis for pinned vertical expanded tabs
-@@ -1237,8 +1261,8 @@
+@@ -1237,8 +1260,8 @@
            }
          } else {
            let tabs = this.ariaFocusableItems.slice(
@@ -137,7 +127,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
            );
            let size = this.verticalMode ? "height" : "width";
            let screenAxis = this.verticalMode ? "screenY" : "screenX";
-@@ -1287,11 +1311,13 @@
+@@ -1287,11 +1310,13 @@
            this.dragToPinPromoCard,
          ];
          let shouldPin =
@@ -151,7 +141,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
            isTab(draggedTab) &&
            draggedTab.pinned &&
            this.arrowScrollbox.contains(event.target);
-@@ -1309,6 +1335,7 @@
+@@ -1309,6 +1334,7 @@
              (oldTranslateY && oldTranslateY != newTranslateY);
          } else if (this.verticalMode) {
            shouldTranslate &&= oldTranslateY && oldTranslateY != newTranslateY;
@@ -159,7 +149,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
          } else {
            shouldTranslate &&= oldTranslateX && oldTranslateX != newTranslateX;
          }
-@@ -1503,6 +1530,7 @@
+@@ -1503,6 +1529,7 @@
  
            let nextItem = this.ariaFocusableItems[newIndex];
            let tabGroup = isTab(nextItem) && nextItem.group;
@@ -167,7 +157,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
            gBrowser.loadTabs(urls, {
              inBackground,
              replace,
-@@ -1541,6 +1569,16 @@
+@@ -1541,6 +1568,17 @@
        }
        this.#resetTabsAfterDrop(draggedTab.ownerDocument);
  
@@ -178,6 +168,7 @@ index c7557dad38db9ef02b981c46de9595df77cb67db..510cf06c69253ef25d1d411ad424d892
 +          return;
 +        }
 +      } else if (dt.mozUserCancelled) {
++        gZenViewSplitter.onBrowserDragEndToSplit(event, true);
 +        if (gZenViewSplitter._lastOpenedTab) gZenViewSplitter._lastOpenedTab._visuallySelected = false;
 +      }
 +

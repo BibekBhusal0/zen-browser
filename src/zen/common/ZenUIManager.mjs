@@ -16,12 +16,6 @@ var gZenUIManager = {
     document.addEventListener('popuphidden', this.onPopupHidden.bind(this));
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
-      'sidebarHeightThrottle',
-      'zen.view.sidebar-height-throttle',
-      500
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
       'contentElementSeparation',
       'zen.theme.content-element-separation',
       0
@@ -52,14 +46,10 @@ var gZenUIManager = {
 
     gURLBar._zenTrimURL = this.urlbarTrim.bind(this);
 
-    new ResizeObserver(this.updateTabsToolbar.bind(this)).observe(
-      document.getElementById('TabsToolbar')
-    );
-
     new ResizeObserver(
       gZenCommonActions.throttle(
         gZenCompactModeManager.getAndApplySidebarWidth.bind(gZenCompactModeManager),
-        this.sidebarHeightThrottle
+        Services.prefs.getIntPref('zen.view.sidebar-height-throttle', 500)
       )
     ).observe(gNavToolbox);
 
@@ -69,6 +59,10 @@ var gZenUIManager = {
     });
 
     window.addEventListener('TabClose', this.onTabClose.bind(this));
+    window.addEventListener(
+      'Zen:UrlbarSearchModeChanged',
+      this.onUrlbarSearchModeChanged.bind(this)
+    );
 
     gZenMediaController.init();
     gZenVerticalTabsManager.init();
@@ -107,9 +101,12 @@ var gZenUIManager = {
 
   _initCreateNewPopup() {
     const popup = document.getElementById('zenCreateNewPopup');
-    const button = document.getElementById('zen-create-new-button');
 
     popup.addEventListener('popupshowing', () => {
+      const button = document.getElementById('zen-create-new-button');
+      if (!button) {
+        return;
+      }
       const image = button.querySelector('image');
       button.setAttribute('open', 'true');
       gZenUIManager.motion.animate(
@@ -218,8 +215,10 @@ var gZenUIManager = {
         !el.contains(showEvent.explicitOriginalTarget) ||
         (showEvent.explicitOriginalTarget instanceof Element &&
           showEvent.explicitOriginalTarget?.closest('panel')) ||
-        // See bug #7590: Ignore menupopup elements opening
-        showEvent.explicitOriginalTarget.tagName === 'menupopup'
+        // See bug #7590: Ignore menupopup elements opening.
+        // Also see #10612 for the exclusion of the zen-appcontent-navbar-wrapper
+        (showEvent.explicitOriginalTarget.tagName === 'menupopup' &&
+          el.id !== 'zen-appcontent-navbar-wrapper')
       ) {
         continue;
       }
@@ -247,6 +246,51 @@ var gZenUIManager = {
   },
 
   // Section: URL bar
+
+  onUrlbarSearchModeChanged(event) {
+    const { searchMode } = event.detail;
+    const input = gURLBar.textbox;
+    if (gURLBar.hasAttribute('breakout-extend') && !this._animatingSearchMode) {
+      this._animatingSearchMode = true;
+      this.motion.animate(input, { scale: [1, 0.98, 1] }, { duration: 0.25 }).then(() => {
+        delete this._animatingSearchMode;
+      });
+      if (searchMode) {
+        gURLBar.setAttribute('animate-searchmode', 'true');
+        this._animatingSearchModeTimeout = setTimeout(() => {
+          requestAnimationFrame(() => {
+            gURLBar.removeAttribute('animate-searchmode');
+            delete this._animatingSearchModeTimeout;
+          });
+        }, 1000);
+      }
+    }
+  },
+
+  enableCommandsMode(event) {
+    event.preventDefault();
+    if (!gURLBar.hasAttribute('breakout-extend') || this._animatingSearchMode) {
+      return;
+    }
+    const currentSearchMode = gURLBar.getSearchMode(gBrowser.selectedBrowser);
+    let searchMode = null;
+    if (!currentSearchMode) {
+      searchMode = {
+        source: UrlbarUtils.RESULT_SOURCE.ZEN_ACTIONS,
+        isPreview: true,
+      };
+    }
+    gURLBar.removeAttribute('animate-searchmode');
+    if (this._animatingSearchModeTimeout) {
+      clearTimeout(this._animatingSearchModeTimeout);
+      delete this._animatingSearchModeTimeout;
+    }
+    gURLBar.searchMode = searchMode;
+    gURLBar.startQuery({
+      allowAutofill: false,
+      event,
+    });
+  },
 
   get newtabButtons() {
     return document.querySelectorAll('#tabs-newtab-button');
@@ -640,7 +684,8 @@ var gZenVerticalTabsManager = {
       !aItem.isConnected ||
       gZenUIManager.testingEnabled ||
       !gZenStartup.isReady ||
-      !gZenPinnedTabManager.hasInitializedPins
+      !gZenPinnedTabManager.hasInitializedPins ||
+      aItem.group?.hasAttribute('split-view-group')
     ) {
       return;
     }
@@ -1102,7 +1147,7 @@ var gZenVerticalTabsManager = {
         ? this._tabEdited.querySelector('.tab-label-container-editing')
         : this._tabEdited;
       let input = document.getElementById('tab-label-input');
-      let newName = input.value.trim();
+      let newName = input.value.replace(/\s+/g, ' ').trim();
 
       document.documentElement.removeAttribute('zen-renaming-tab');
       input.remove();

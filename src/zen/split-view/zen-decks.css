@@ -6,6 +6,8 @@
 
 /** Zen Decks - ONLY USED FOR SPLIT VIEWS, DO NOT USE THIS CLASS FOR ANY OTHER PURPOSE **/
 
+%include zen-split-group.inc.css
+
 #tabbrowser-tabpanels[zen-split-view='true'] {
   display: flex;
   flex-direction: row;
@@ -182,7 +184,7 @@
   position: absolute;
   height: 100%;
   border: 2px solid var(--zen-primary-color);
-  background: rgba(255, 255, 255, 0.01);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: var(--zen-native-inner-radius);
   box-shadow: var(--zen-big-shadow);
   overflow: hidden;

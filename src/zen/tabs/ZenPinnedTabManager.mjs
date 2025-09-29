@@ -19,6 +19,8 @@
       'TabGrouped',
       'TabUngrouped',
       'ZenFolderChangedWorkspace',
+      'TabAddedToEssentials',
+      'TabRemovedFromEssentials',
     ];
 
     #listeners = [];
@@ -396,12 +398,23 @@
     _onPinnedTabEvent(action, event) {
       if (!this.enabled) return;
       const tab = event.target;
+      if (this._ignoreNextTabPinnedEvent) {
+        delete this._ignoreNextTabPinnedEvent;
+        return;
+      }
       switch (action) {
         case 'TabPinned':
+        case 'TabAddedToEssentials':
           tab._zenClickEventListener = this._zenClickEventListener;
           tab.addEventListener('click', tab._zenClickEventListener);
           this._setPinnedAttributes(tab);
           break;
+        case 'TabRemovedFromEssentials':
+          if (tab.pinned) {
+            this.#onTabMove(tab);
+            break;
+          }
+        // [Fall through]
         case 'TabUnpinned':
           this._removePinnedAttributes(tab);
           if (tab._zenClickEventListener) {
@@ -821,10 +834,11 @@
                   }, 3000);
                 });
               }
-              const group = selectedTab.group?.hasAttribute('split-view-group')
-                ? selectedTab.group.group
-                : selectedTab.group;
-              await gZenFolders.animateUnload(group, selectedTab);
+              await gZenFolders.collapseVisibleTab(
+                selectedTab.group,
+                /* only if active */ true,
+                selectedTab
+              );
               let tabsToUnload = [selectedTab];
               if (selectedTab.group?.hasAttribute('split-view-group')) {
                 tabsToUnload = selectedTab.group.tabs;
@@ -956,30 +970,33 @@
           const pin = this._pinsCache.find((pin) => pin.uuid === tab.getAttribute('zen-pin-id'));
           if (pin) {
             pin.isEssential = true;
+            pin.workspaceUuid = null;
             this.savePin(pin);
           }
-          if (tab.ownerGlobal !== window) {
-            tab = gBrowser.adoptTab(tab, {
-              selectTab: tab.selected,
-            });
-            tab.setAttribute('zen-essential', 'true');
-          } else {
-            section.appendChild(tab);
-          }
-          gBrowser.tabContainer._invalidateCachedTabs();
+          gBrowser.zenHandleTabMove(tab, () => {
+            if (tab.ownerGlobal !== window) {
+              tab = gBrowser.adoptTab(tab, {
+                selectTab: tab.selected,
+              });
+              tab.setAttribute('zen-essential', 'true');
+            } else {
+              section.appendChild(tab);
+            }
+          });
         } else {
           gBrowser.pinTab(tab);
+          this._ignoreNextTabPinnedEvent = true;
         }
         tab.setAttribute('zenDefaultUserContextId', true);
         if (tab.selected) {
           gZenWorkspaces.switchTabIfNeeded(tab);
         }
-        this.#onTabMove(tab);
         this.onTabIconChanged(tab);
-
         // Dispatch the event to update the UI
         const event = new CustomEvent('TabAddedToEssentials', {
           detail: { tab },
+          bubbles: true,
+          cancelable: false,
         });
         tab.dispatchEvent(event);
       }
@@ -1002,15 +1019,16 @@
         if (unpin) {
           gBrowser.unpinTab(tab);
         } else {
-          const pinContainer = gZenWorkspaces.pinnedTabsContainer;
-          pinContainer.prepend(tab);
-          gBrowser.tabContainer._invalidateCachedTabs();
-          this.#onTabMove(tab);
+          gBrowser.zenHandleTabMove(tab, () => {
+            const pinContainer = gZenWorkspaces.pinnedTabsContainer;
+            pinContainer.prepend(tab);
+          });
         }
-
         // Dispatch the event to update the UI
         const event = new CustomEvent('TabRemovedFromEssentials', {
           detail: { tab },
+          bubbles: true,
+          cancelable: false,
         });
         tab.dispatchEvent(event);
       }
@@ -1067,6 +1085,7 @@
       document
         .getElementById('cmd_contextZenAddToEssentials')
         .setAttribute('disabled', !this.canEssentialBeAdded(contextTab));
+      document.getElementById('context_closeTab').hidden = contextTab.hasAttribute('zen-essential');
       document.getElementById('context_zen-remove-essential').hidden =
         !contextTab.getAttribute('zen-essential');
       document.getElementById('zen-context-menu-new-folder').hidden =
@@ -1245,12 +1264,13 @@
       for (const item of this.dragShiftableItems) {
         item.style.transform = '';
       }
+      delete this._topToNormalTabs;
       for (const item of gBrowser.tabContainer.ariaFocusableItems) {
         if (gBrowser.isTab(item)) {
           let isVisible = true;
           let parent = item.group;
           while (parent) {
-            if (!parent.visible) {
+            if (parent.collapsed && !parent.hasAttribute('has-active')) {
               isVisible = false;
               break;
             }
@@ -1279,7 +1299,7 @@
         : [separator];
     }
 
-    animateSeparatorMove(movingTabs, dropElement, isPinned, event) {
+    animateSeparatorMove(movingTabs, dropElement, isPinned) {
       let draggedTab = movingTabs[0];
       if (gBrowser.isTabGroupLabel(draggedTab) && draggedTab.group.isZenFolder) {
         this._isGoingToPinnedTabs = true;
@@ -1289,14 +1309,19 @@
         draggedTab = draggedTab.group;
       }
       const itemsToCheck = this.dragShiftableItems;
-      const translate = event.screenY;
+      let translate = movingTabs[isPinned ? movingTabs.length - 1 : 0].getBoundingClientRect().top;
+      if (isPinned) {
+        const rect = draggedTab.getBoundingClientRect();
+        translate += rect.height;
+      }
       const draggingTabHeight = movingTabs.reduce((acc, item) => {
         return acc + window.windowUtils.getBoundsWithoutFlushing(item).height;
       }, 0);
-      let topToNormalTabs = itemsToCheck[0].screenY;
-      if (!isPinned) {
-        topToNormalTabs += draggedTab.getBoundingClientRect().height;
+      if (typeof this._topToNormalTabs === 'undefined') {
+        const rects = itemsToCheck.map((item) => window.windowUtils.getBoundsWithoutFlushing(item));
+        this._topToNormalTabs = rects[0].top + rects.at(-1).height / (isPinned ? 2 : 4);
       }
+      let topToNormalTabs = this._topToNormalTabs;
       const isGoingToPinnedTabs =
         translate < topToNormalTabs && gBrowser.pinnedTabCount - gBrowser._numZenEssentials > 0;
       const multiplier = isGoingToPinnedTabs !== isPinned ? (isGoingToPinnedTabs ? 1 : -1) : 0;
